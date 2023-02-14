@@ -13,11 +13,14 @@
 #define X_OFFSET SCREEN_WIDTH / 2
 #define Y_OFFSET SCREEN_HEIGHT / 2
 
-#define RAY_STEP_LENGTH .05
+#define RAY_STEP_LENGTH .03
 
 #define MOVEMENT_SPEED .01
-#define ROTATION_SPEED M_PI / 2250
+#define ROTATION_SPEED M_PI / 1125
 #define FOV 45
+
+#define draw_start_y(distance) (SCREEN_HEIGHT / 2 - SCREEN_HEIGHT / distance)
+#define draw_end_y(distance) (SCREEN_HEIGHT / 2 + SCREEN_HEIGHT / distance)
 
 /*
     Raycast-Engine
@@ -34,7 +37,7 @@ struct Camera
     struct Vector position, direction, plane;
 };
 
-bool game_is_running = true, game_is_paused = false;;
+bool game_is_running = true;
 
 int map_width = 10, map_height = 10;
 int map[10][10] = {
@@ -44,9 +47,9 @@ int map[10][10] = {
     {2,0,0,0,0,0,0,0,0,1},
     {1,0,0,0,0,0,0,0,0,2},
     {2,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,2},
-    {2,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,2}, 
+    {1,0,0,1,1,1,2,0,0,2},
+    {2,0,0,1,0,0,0,0,0,1},
+    {1,0,0,1,0,0,0,0,0,2}, 
     {1,2,1,2,1,2,1,1,1,1}};
 
 int rotation_direction = 0, movement_direction = 0, side_direction = 0;
@@ -62,16 +65,15 @@ bool point_is_on_map(struct Vector *point)
 
 bool point_is_a_wall(struct Vector *point)
 {
-    return (!map[(int) point->y][(int) point->x] == 0);
+    return (map[(int) point->y][(int) point->x] != 0);
 }
 
-/*
-    liest eine map aus einer datei ein
-*/
-void load_map()
+double distance_between_points(struct Vector *p1, struct Vector *p2)
 {
-    char file_path[50];
-    scanf("%50s", file_path);
+    double delta_x = fabs(p1->x - p2->x);
+    double delta_y = fabs(p1->y - p2->y);
+
+    return sqrt((delta_x * delta_x) + (delta_y * delta_y));
 }
 
 void events()
@@ -112,11 +114,7 @@ void events()
 
                 case SDLK_d:
                     side_direction = -1;
-                    break;       
-
-                case SDLK_l:
-                    load_map();
-                    break;             
+                    break;                 
 
                 default:
                     break;
@@ -213,38 +211,33 @@ double cast_ray(struct Vector *offset, int *color)
     struct Vector ray_point = {.x = cam.position.x, .y = cam.position.y};
     struct Vector ray_direction = {.x = cam.direction.x + offset->x, .y = cam.direction.y + offset->y};
     
-    double delta_x = 0, delta_y = 0, distance = -1;
+    double delta_x = 0, delta_y = 0, distance;
 
     /*
         geht so lange in richtung des strahls, bis das ende der map oder eine wand erreicht ist
     */
     while (point_is_on_map(&ray_point))
     {
-        /*
-            verlängert den strahl um RAY_STEP_LENGTH einheiten
-        */
+        bool hit = false;
+
         ray_point.x += ray_direction.x * RAY_STEP_LENGTH;
+        if (point_is_a_wall(&ray_point))
+        {
+            *color = map[(int) ray_point.y][(int) ray_point.x] * 3;
+            distance = distance_between_points(&cam.position, &ray_point);
+            return distance;
+        }
+
         ray_point.y += ray_direction.y * RAY_STEP_LENGTH;
-
-        if (!point_is_a_wall(&ray_point)) continue;
-        
-        /*
-            übergibt farbe der getroffenen wand
-        */
-        *color = map[(int) ray_point.y][(int) ray_point.x];
-
-        /*
-            berechnung der distanz
-        */
-        delta_x = fabs(cam.position.x - ray_point.x);
-        delta_y = fabs(cam.position.y - ray_point.y);
-
-        distance = sqrt((delta_x * delta_x) + (delta_y * delta_y));
-
-        break;
+        if (point_is_a_wall(&ray_point))
+        {
+            *color = map[(int) ray_point.y][(int) ray_point.x];
+            distance = distance_between_points(&cam.position, &ray_point);
+            return distance;
+        }
     }
 
-    return distance;
+    return -1;
 }
 
 /*
@@ -262,18 +255,17 @@ void set_color(SDL_Renderer *renderer, int color)
         SDL_SetRenderDrawColor(renderer, 130, 130, 130, 255);
         break;
 
+    case 3:
+        SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+        break;
+
+    case 6:
+        SDL_SetRenderDrawColor(renderer, 135, 135, 135, 255);
+        break;
+
     default:
         break;
     }
-}
-
-/*
-    gibt den y-wert zurück, bei dem eine linie für die übergebene entfernung anfangen / enden sollte
-    distance für anfang und -distance für ende übergeben
-*/
-int draw_start_stop_y(double distance)
-{
-    return SCREEN_HEIGHT / 2 - SCREEN_HEIGHT / distance;
 }
 
 void render(SDL_Renderer *renderer)
@@ -293,7 +285,7 @@ void render(SDL_Renderer *renderer)
     /*
         führt für jeden x wert des bildschirms einen raycast durch
     */
-    for (int i = 0; i < SCREEN_WIDTH / 2; i++)
+    for (int i = 0; i <= SCREEN_WIDTH / 2; i++)
     {
         /*
             offset um wie viel sich die richtung des strahls von der richtung der kamera unterscheidet
@@ -307,7 +299,7 @@ void render(SDL_Renderer *renderer)
         */
         double distance = cast_ray(&direction_offset, &color);
         set_color(renderer, color);        
-        if (distance > 0) SDL_RenderDrawLine(renderer, X_OFFSET + i, draw_start_stop_y(distance), X_OFFSET + i, draw_start_stop_y(-distance));
+        if (distance > 0) SDL_RenderDrawLine(renderer, X_OFFSET + i, draw_start_y(distance), X_OFFSET + i, draw_end_y(distance));
         
         /*
             linke seite vom bildschirm
@@ -315,7 +307,7 @@ void render(SDL_Renderer *renderer)
         direction_offset.x = -direction_offset.x, direction_offset.y = -direction_offset.y;
         distance = cast_ray(&direction_offset, &color);
         set_color(renderer, color);
-        if (distance > 0) SDL_RenderDrawLine(renderer, X_OFFSET - i, draw_start_stop_y(distance), X_OFFSET - i, draw_start_stop_y(-distance));
+        if (distance > 0) SDL_RenderDrawLine(renderer, X_OFFSET - i, draw_start_y(distance), X_OFFSET - i, draw_end_y(distance));
     }
 
     SDL_RenderPresent(renderer);
