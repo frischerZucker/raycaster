@@ -14,9 +14,11 @@
 #define Y_OFFSET SCREEN_HEIGHT / 2
 
 #define RAY_STEP_LENGTH .03
+#define CLOCKS_PER_TICK CLOCKS_PER_SEC / TICKS_PER_SECOND
 
-#define MOVEMENT_SPEED .01
-#define ROTATION_SPEED M_PI / 1125
+#define TICKS_PER_SECOND 60
+#define MOVEMENT_SPEED .03
+#define ROTATION_SPEED M_PI / 300
 #define FOV 45
 
 #define draw_start_y(distance) (SCREEN_HEIGHT / 2 - SCREEN_HEIGHT / distance)
@@ -320,11 +322,23 @@ int main(int argc, char const *argv[])
     SDL_Surface *screen = SDL_GetWindowSurface(window);
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
+    clock_t time_of_last_tick, current_time;
+    time_of_last_tick = clock();
+
     while (game_is_running)
     {
         events();
 
-        update_camera();
+        /*
+            sorgt dafür das logik im if-block nicht beliebig oft, sondern nur TICKS_PER_SECOND oft pro sekunde ausgeführt wird
+        */
+        current_time = clock();
+        if((current_time - time_of_last_tick) >= CLOCKS_PER_TICK)
+        {
+            time_of_last_tick = current_time;
+            
+            update_camera();
+        }
 
         render(renderer);
     }
