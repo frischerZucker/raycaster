@@ -13,8 +13,13 @@
 #define X_OFFSET SCREEN_WIDTH / 2
 #define Y_OFFSET SCREEN_HEIGHT / 2
 
-#define RAY_STEP_LENGTH .03
+#define RAY_STEP_LENGTH .01
 #define CLOCKS_PER_TICK CLOCKS_PER_SEC / TICKS_PER_SECOND
+
+//ansonsten meckert vscode rum, dass M_PI entweder nicht definiert oder erneut definiert ist
+#ifndef M_PI
+#define M_PI    3.14159265358979323846264338327950288
+#endif
 
 #define TICKS_PER_SECOND 60
 #define MOVEMENT_SPEED .03
@@ -59,6 +64,8 @@ int rotation_direction = 0, movement_direction = 0, side_direction = 0;
 struct Camera cam = {.position.x = 5, .position.y = 5, .direction.x = 0, .direction.y = -1, .plane.x = FOV / 90.0, .plane.y = 0};
 
 const SDL_Rect FLOOR_RECT = {.x = 0, .y = SCREEN_HEIGHT / 2, .w = SCREEN_WIDTH, .h = SCREEN_HEIGHT / 2};    //wird genutzt um den "boden" darzustellen 
+
+uint8_t pixels[SCREEN_WIDTH * SCREEN_HEIGHT * 4] = {0};
 
 bool point_is_on_map(struct Vector *point)
 {
@@ -213,15 +220,13 @@ double cast_ray(struct Vector *offset, int *color)
     struct Vector ray_point = {.x = cam.position.x, .y = cam.position.y};
     struct Vector ray_direction = {.x = cam.direction.x + offset->x, .y = cam.direction.y + offset->y};
     
-    double delta_x = 0, delta_y = 0, distance;
+    double delta_x = 0, delta_y = 0, distance;    
 
     /*
         geht so lange in richtung des strahls, bis das ende der map oder eine wand erreicht ist
     */
     while (point_is_on_map(&ray_point))
     {
-        bool hit = false;
-
         ray_point.x += ray_direction.x * RAY_STEP_LENGTH;
         if (point_is_a_wall(&ray_point))
         {
@@ -245,24 +250,32 @@ double cast_ray(struct Vector *offset, int *color)
 /*
     legt die zu malende farbe abhängig davon fest, welche art von wand getroffen wurde
 */
-void set_color(SDL_Renderer *renderer, int color)
+void set_color(int color_id, SDL_Color *color)
 {
-    switch (color)
+    switch (color_id)
     {
     case 1:
-        SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
+        color->r = 20;
+        color->g = 20;
+        color->b = 20;
         break;
 
     case 2:
-        SDL_SetRenderDrawColor(renderer, 130, 130, 130, 255);
+        color->r = 80;
+        color->g = 80;
+        color->b = 80;
         break;
 
     case 3:
-        SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+        color->r = 25;
+        color->g = 25;
+        color->b = 25;
         break;
 
     case 6:
-        SDL_SetRenderDrawColor(renderer, 135, 135, 135, 255);
+        color->r = 85;
+        color->g = 85;
+        color->b = 85;
         break;
 
     default:
@@ -270,6 +283,9 @@ void set_color(SDL_Renderer *renderer, int color)
     }
 }
 
+/*
+    veraltet & funktioniert aktuell aufgrund neuer parameter für set_color() nicht, durch render_textured ersetzt
+*/
 void render(SDL_Renderer *renderer)
 {
     /*
@@ -300,7 +316,7 @@ void render(SDL_Renderer *renderer)
             rechte seite vom bildschirm
         */
         double distance = cast_ray(&direction_offset, &color);
-        set_color(renderer, color);        
+        //set_color(renderer, color);        
         if (distance > 0) SDL_RenderDrawLine(renderer, X_OFFSET + i, draw_start_y(distance), X_OFFSET + i, draw_end_y(distance));
         
         /*
@@ -308,11 +324,111 @@ void render(SDL_Renderer *renderer)
         */
         direction_offset.x = -direction_offset.x, direction_offset.y = -direction_offset.y;
         distance = cast_ray(&direction_offset, &color);
-        set_color(renderer, color);
+        //set_color(renderer, color);
         if (distance > 0) SDL_RenderDrawLine(renderer, X_OFFSET - i, draw_start_y(distance), X_OFFSET - i, draw_end_y(distance));
     }
 
     SDL_RenderPresent(renderer);
+}
+
+void render_textured(SDL_Renderer *renderer, SDL_Texture *texture)
+{
+    //  malt die decke
+    for (int i = 0; i < SCREEN_HEIGHT * SCREEN_WIDTH / 2; i++)
+    {
+        pixels[4 * i] = 50;     //  rot
+        pixels[4 * i + 1] = 50; //  grün
+        pixels[4 * i + 2] = 50; //  blau
+    }
+    //  malt den boden
+    for (int i = SCREEN_HEIGHT * SCREEN_WIDTH / 2; i < SCREEN_HEIGHT * SCREEN_WIDTH; i++)
+    {
+        pixels[4 * i] = 100;        //  rot
+        pixels[4 * i + 1] = 100;    //  grün
+        pixels[4 * i + 2] = 100;    //  blau
+    }
+
+    /*
+        rechte seite vom bildschirm
+    */
+    for (int i = 0; i < SCREEN_WIDTH / 2; i++)
+    {
+        /*
+            offset um wie viel sich die richtung des strahls von der richtung der kamera unterscheidet
+        */
+        struct Vector direction_offset = {.x = cam.plane.x / (SCREEN_WIDTH / 2) * i, .y = cam.plane.y / (SCREEN_WIDTH / 2) * i};
+
+        int color_id = 0;
+        SDL_Color color;
+
+        double distance = cast_ray(&direction_offset, &color_id);
+        set_color(color_id, &color);
+
+        if (distance < 0) continue;
+        for (int y = draw_start_y(distance); y <= draw_end_y(distance); y++)
+        {
+            if (y < 0 || y >= SCREEN_HEIGHT) continue;
+            pixels[(X_OFFSET + i + SCREEN_WIDTH * y) * 4] = color.r;
+            pixels[(X_OFFSET + i + SCREEN_WIDTH * y) * 4 + 1] = color.g;
+            pixels[(X_OFFSET + i + SCREEN_WIDTH * y) * 4 + 2] = color.b;
+        }
+    }
+    /*
+        linke seite vom bildschirm
+    */
+    for (int i = 0; i <= SCREEN_WIDTH / 2; i++)
+    {
+        struct Vector direction_offset = {.x = -cam.plane.x / (SCREEN_WIDTH / 2) * i, .y = -cam.plane.y / (SCREEN_WIDTH / 2) * i};
+
+        int color_id = 0;
+        SDL_Color color;
+
+        double distance = cast_ray(&direction_offset, &color_id);
+        set_color(color_id, &color);
+
+        if (distance < 0) continue;
+        for (int y = draw_start_y(distance); y <= draw_end_y(distance); y++)
+        {
+            if (y < 0 || y > SCREEN_HEIGHT) continue;
+            pixels[(X_OFFSET - i + SCREEN_WIDTH * y) * 4] = color.r;
+            pixels[(X_OFFSET - i + SCREEN_WIDTH * y) * 4 + 1] = color.g;
+            pixels[(X_OFFSET - i + SCREEN_WIDTH * y) * 4 + 2] = color.b;
+        }
+    }
+
+    int texture_pitch = 0;
+    void* texture_pixels = NULL;
+    
+    SDL_LockTexture(texture, NULL, &texture_pixels, &texture_pitch);
+    memcpy(texture_pixels, pixels, texture_pitch * SCREEN_HEIGHT);
+    SDL_UnlockTexture(texture);
+
+    SDL_RenderCopy(renderer, texture, NULL, NULL);
+
+    SDL_RenderPresent(renderer);
+}
+
+void fps(clock_t t0)
+{
+    static int frames = 0;
+    static clock_t t1, t2;
+    static bool function_did_run_before = false;
+
+    if (!function_did_run_before)
+    {
+        t1 = t0;
+        function_did_run_before = true;
+    }
+
+    frames++;
+
+    t2 = clock();
+    if (difftime(t2 / CLOCKS_PER_SEC, t1 / CLOCKS_PER_SEC) >= 1)
+    {
+        t1 = t2;
+        printf("fps: %d\n", frames);
+        frames = 0;
+    }
 }
 
 int main(int argc, char const *argv[])
@@ -321,6 +437,8 @@ int main(int argc, char const *argv[])
     SDL_Window *window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     SDL_Surface *screen = SDL_GetWindowSurface(window);
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+
+    SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH, SCREEN_HEIGHT);
 
     clock_t time_of_last_tick, current_time;
     time_of_last_tick = clock();
@@ -333,6 +451,9 @@ int main(int argc, char const *argv[])
             sorgt dafür das logik im if-block nicht beliebig oft, sondern nur TICKS_PER_SECOND oft pro sekunde ausgeführt wird
         */
         current_time = clock();
+        
+        fps(time_of_last_tick);
+
         if((current_time - time_of_last_tick) >= CLOCKS_PER_TICK)
         {
             time_of_last_tick = current_time;
@@ -340,7 +461,7 @@ int main(int argc, char const *argv[])
             update_camera();
         }
 
-        render(renderer);
+        render_textured(renderer, texture);
     }
 
     return 0;
