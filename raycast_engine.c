@@ -1,8 +1,10 @@
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
+#include "textures.h"
 
 #define WINDOW_WIDTH 1000
 #define WINDOW_HEIGHT 600
@@ -15,13 +17,6 @@
 
 #define RAY_STEP_LENGTH .01
 #define CLOCKS_PER_TICK CLOCKS_PER_SEC / TICKS_PER_SECOND
-
-#define LEFT_SIDE_OF_THE_WINDOW -1
-#define RIGHT_SIDE_OF_THE_WINDOW 1
-
-#define TEXTURE_HEIGHT 64
-#define TEXTURE_WIDTH 64
-#define NUMBER_OF_TEXTURES 2
 
 #define WALL_SECTION_WIDTH (double) 1 / TEXTURE_WIDTH
 
@@ -76,11 +71,8 @@ int rotation_direction = 0, movement_direction = 0, side_direction = 0;
 struct Camera cam = {.position.x = 5, .position.y = 5, .direction.x = 0, .direction.y = -1, .plane.x = FOV / 90.0, .plane.y = 0};
 // struct Camera cam = {.position.x = 5, .position.y = 5, .direction.x = 1, .direction.y = 0, .plane.x = 0, .plane.y = FOV / 90.0};
 
-SDL_Color wall_texture[NUMBER_OF_TEXTURES][TEXTURE_HEIGHT][TEXTURE_WIDTH];
 const SDL_Color FLOOR_COLOR = {.r = 100, .g = 100, .b = 100};
 const SDL_Color SKY_COLOR = {.r = 50, .g = 50, .b = 50};
-
-const SDL_Rect FLOOR_RECT = {.x = 0, .y = WINDOW_HEIGHT / 2, .w = WINDOW_WIDTH, .h = WINDOW_HEIGHT / 2};    //wird genutzt um den "boden" darzustellen 
 
 uint8_t pixels[WINDOW_WIDTH * WINDOW_HEIGHT * 4] = {0};
 
@@ -185,29 +177,6 @@ void events()
     }
 }
 
-void init_textures()
-{
-    for (int i = 0; i < TEXTURE_HEIGHT; i++)
-    {
-        for (int j = 0; j < TEXTURE_WIDTH; j++)
-        {
-            wall_texture[0][i][j].r = 80;
-            wall_texture[0][i][j].g = 3 * j;
-            wall_texture[0][i][j].b = 3 * i;
-        }
-    }
-
-    for (int i = 0; i < TEXTURE_HEIGHT; i++)
-    {
-        for (int j = 0; j < TEXTURE_WIDTH; j++)
-        {
-            wall_texture[1][i][j].r = 100;
-            wall_texture[1][i][j].g = 0;
-            wall_texture[1][i][j].b = 100;
-        }
-    }
-}
-
 /*
     rotiert die kamera um den übergebenen winkel (bogenmaß!).
     positiver winkel -> drehung nach rechts
@@ -305,10 +274,9 @@ void render_walls(uint8_t *pixels)
         struct Vector direction_offset = {.x = cam.plane.x / (WINDOW_WIDTH / 2) * i, .y = cam.plane.y / (WINDOW_WIDTH / 2) * i};
 
         int texture_id = 0;
+        double hprizontal_position_on_wall;
 
-        double wall_x;
-
-        double distance = raycast(&direction_offset, &texture_id, &wall_x);
+        double distance = raycast(&direction_offset, &texture_id, &hprizontal_position_on_wall);
         
 
         if (distance < 0) continue;
@@ -317,8 +285,6 @@ void render_walls(uint8_t *pixels)
             berechnet anfangs- und endpunkt der wand
         */
         double draw_start = draw_start_y(distance), draw_end = draw_end_y(distance);
-        if (draw_start < 0) draw_start = 0;
-        if (draw_end > WINDOW_HEIGHT) draw_end = WINDOW_HEIGHT - 1;
 
         /*
             anzahl an pixeln des fensters die einem pixel der textur der wand entsprechen
@@ -328,8 +294,31 @@ void render_walls(uint8_t *pixels)
         double end_of_current_wall_section = draw_start + wall_section_height;
         int texture_y = 0, texture_x = -1;
 
-        for (double x = (int) wall_x; x <= wall_x; x += WALL_SECTION_WIDTH) texture_x++;
+        /*
+            schaut welchem x-wert der textur die position auf der wand entspricht
+        */
+        for (double x = (int) hprizontal_position_on_wall; x <= hprizontal_position_on_wall; x += WALL_SECTION_WIDTH) texture_x++;
         
+        /*
+            begrenzt draw_start und draw_end auf die dimensionen des fensters
+        */
+        if (draw_start < 0)
+        {
+            /*
+                verschiebt den startwert der textur-y-koordinate um das aus dem fenster ragende stück zu überspringen
+            */
+            for (draw_start += wall_section_height; draw_start < 0; draw_start += wall_section_height)
+            {
+                texture_y++;
+                end_of_current_wall_section += wall_section_height;
+            }
+            draw_start = 0;
+        }
+        if (draw_end > WINDOW_HEIGHT) draw_end = WINDOW_HEIGHT - 1;
+
+        /*
+            malt alle pixel zwischen draw_start und draw_end
+        */
         for (int y = draw_start; y <= draw_end; y++)
         {
             if (y >= end_of_current_wall_section)
@@ -338,9 +327,9 @@ void render_walls(uint8_t *pixels)
                 end_of_current_wall_section += wall_section_height;
             }
 
-            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4] = wall_texture[texture_id][texture_y][texture_x].r;
-            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4 + 1] = wall_texture[texture_id][texture_y][texture_x].g;
-            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4 + 2] = wall_texture[texture_id][texture_y][texture_x].b;
+            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4] = textures[texture_id][texture_y * TEXTURE_WIDTH + texture_x].r;
+            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4 + 1] = textures[texture_id][texture_y * TEXTURE_WIDTH + texture_x].g;
+            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4 + 2] = textures[texture_id][texture_y * TEXTURE_WIDTH + texture_x].b;
         }
     }
 }
@@ -403,9 +392,7 @@ int main(int argc, char const *argv[])
 {
     SDL_Init(SDL_INIT_EVERYTHING);
     SDL_Window *window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN);
-    SDL_Surface *screen = SDL_GetWindowSurface(window);
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-
     SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, WINDOW_WIDTH, WINDOW_HEIGHT);
 
     init_textures();
