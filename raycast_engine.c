@@ -28,18 +28,14 @@
 #define M_PI_2 M_PI / 2
 #endif
 
-#define TICKS_PER_SECOND 60
-#define MOVEMENT_SPEED .03
-#define ROTATION_SPEED M_PI / 300
+#define TICKS_PER_SECOND 30
+#define MOVEMENT_SPEED .04
+#define ROTATION_SPEED M_PI / 200
 #define FOV 40
+#define LIGHT_INTENSITY_MULTIPLIER 5
 
-#define draw_start_y(distance) (WINDOW_HEIGHT / 2 - WINDOW_HEIGHT / distance)
-#define draw_end_y(distance) (WINDOW_HEIGHT / 2 + WINDOW_HEIGHT / distance)
-
-/*
-    Raycast-Engine
-    --------------
-*/
+#define draw_start_y(distance) (Y_OFFSET - WINDOW_HEIGHT / distance)
+#define draw_end_y(distance) (Y_OFFSET + WINDOW_HEIGHT / distance)
 
 struct Vector
 {
@@ -201,13 +197,16 @@ void update_camera()
 {
     if (rotation_direction != 0) rotate_camera(rotation_direction * ROTATION_SPEED);
 
-    struct Vector destination;
+    // beendet funktion wenn keine bewegung stattfindet um unnötige berechnungen zu sparen
+    if (movement_direction == 0 && side_direction == 0) return;
+
+    struct Vector destination = {.x = cam.position.x, .y = cam.position.y};
 
     /*
         vorwärts- / rückwärtsbewegung
     */
-    destination.x = cam.position.x + movement_direction * cam.direction.x * MOVEMENT_SPEED;
-    destination.y = cam.position.y + movement_direction * cam.direction.y * MOVEMENT_SPEED;
+    destination.x += movement_direction * cam.direction.x * MOVEMENT_SPEED;
+    destination.y += movement_direction * cam.direction.y * MOVEMENT_SPEED;
 
     /*
         seitwärtsbewegung
@@ -223,9 +222,9 @@ void update_camera()
 /*
     "schießt" einen strahl von der position der kamera aus und gibt die distanz der nächsten wand zurück.
     die richtung des strahls setzt sich aus dem richtungsvektor der kamera und dem offset (teil des plane vectors der kamera) zusammen.
-    legt auf fest, welche textur die wand besitzen soll
+    setzt zudem einige zusätzlich zum rendern benötigte infos (texture_id & horizontal_position_on_wall)
 */
-double raycast(struct Vector *offset, int *texture_id, double *texture_x)
+double raycast(struct Vector *offset, int *texture_id, double *horizontal_position_on_wall)
 {
     struct Vector ray_point = {.x = cam.position.x, .y = cam.position.y};
     struct Vector ray_direction = {.x = cam.direction.x + offset->x, .y = cam.direction.y + offset->y};
@@ -243,7 +242,7 @@ double raycast(struct Vector *offset, int *texture_id, double *texture_x)
         if (point_is_a_wall(&ray_point))
         {
             *texture_id = map[(int) ray_point.y][(int) ray_point.x] - 1;
-            *texture_x = ray_point.y;
+            *horizontal_position_on_wall = ray_point.y;
             distance = distance_between_points(&cam.position, &ray_point); 
             return distance;
         }
@@ -252,7 +251,7 @@ double raycast(struct Vector *offset, int *texture_id, double *texture_x)
         if (point_is_a_wall(&ray_point))
         {
             *texture_id = map[(int) ray_point.y][(int) ray_point.x] - 1;
-            *texture_x = ray_point.x;
+            *horizontal_position_on_wall = ray_point.x;
             distance = distance_between_points(&cam.position, &ray_point);
             return distance;
         }
@@ -274,12 +273,16 @@ void render_walls(uint8_t *pixels)
         struct Vector direction_offset = {.x = cam.plane.x / (WINDOW_WIDTH / 2) * i, .y = cam.plane.y / (WINDOW_WIDTH / 2) * i};
 
         int texture_id = 0;
-        double hprizontal_position_on_wall;
+        double horizontal_position_on_wall; //  x bzw y koordinate des punkts in dem die wand getroffen wird
 
-        double distance = raycast(&direction_offset, &texture_id, &hprizontal_position_on_wall);
-        
-
+        double distance = raycast(&direction_offset, &texture_id, &horizontal_position_on_wall);
         if (distance < 0) continue;
+
+        /*
+            weiter entfernte wände werden durch geringere lichtintensität dunkler gerendert
+        */
+        double light_intensity = 1 / distance * LIGHT_INTENSITY_MULTIPLIER;
+        if (light_intensity > 1) light_intensity = 1;
 
         /*
             berechnet anfangs- und endpunkt der wand
@@ -297,7 +300,7 @@ void render_walls(uint8_t *pixels)
         /*
             schaut welchem x-wert der textur die position auf der wand entspricht
         */
-        for (double x = (int) hprizontal_position_on_wall; x <= hprizontal_position_on_wall; x += WALL_SECTION_WIDTH) texture_x++;
+        for (double x = (int) horizontal_position_on_wall; x <= horizontal_position_on_wall; x += WALL_SECTION_WIDTH) texture_x++;
         
         /*
             begrenzt draw_start und draw_end auf die dimensionen des fensters
@@ -327,9 +330,18 @@ void render_walls(uint8_t *pixels)
                 end_of_current_wall_section += wall_section_height;
             }
 
-            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4] = textures[texture_id][texture_y * TEXTURE_WIDTH + texture_x].r;
-            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4 + 1] = textures[texture_id][texture_y * TEXTURE_WIDTH + texture_x].g;
-            pixels[(X_OFFSET + i + WINDOW_WIDTH * y) * 4 + 2] = textures[texture_id][texture_y * TEXTURE_WIDTH + texture_x].b;
+            /*
+                umwandlung der 2d-textur-koordinaten zu 1d-index
+            */
+            int position_on_texture = texture_pointer_offset(texture_id) + texture_y * TEXTURE_WIDTH + texture_x;
+            /*
+                umwandlung der 2d-fenster-koordinaten zu 1d-index
+            */
+            int position_in_pixel_array = (X_OFFSET + i + WINDOW_WIDTH * y) * 4;
+
+            pixels[position_in_pixel_array] = texture_pointer[position_on_texture].r * light_intensity;
+            pixels[position_in_pixel_array + 1] = texture_pointer[position_on_texture].g * light_intensity;
+            pixels[position_in_pixel_array + 2] = texture_pointer[position_on_texture].b * light_intensity;
         }
     }
 }
@@ -404,13 +416,13 @@ int main(int argc, char const *argv[])
     {
         events();
 
-        /*
-            sorgt dafür das logik im if-block nicht beliebig oft, sondern nur TICKS_PER_SECOND oft pro sekunde ausgeführt wird
-        */
         current_time = clock();
         
         fps(time_of_last_tick);
 
+        /*
+            sorgt dafür das logik im if-block nicht beliebig oft, sondern nur TICKS_PER_SECOND oft pro sekunde ausgeführt wird
+        */
         if((current_time - time_of_last_tick) >= CLOCKS_PER_TICK)
         {
             time_of_last_tick = current_time;
