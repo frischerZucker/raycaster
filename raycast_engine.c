@@ -4,53 +4,15 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
-#include "textures.h"
-
-#define WINDOW_WIDTH 1000
-#define WINDOW_HEIGHT 600
-
-/*
-    zu koordinaten addieren -> verschiebt ursprung in mitte des fensters 
-*/
-#define X_OFFSET WINDOW_WIDTH / 2
-#define Y_OFFSET WINDOW_HEIGHT / 2
-
-#define RAY_STEP_LENGTH .01
-#define CLOCKS_PER_TICK CLOCKS_PER_SEC / TICKS_PER_SECOND
-
-#define WALL_SECTION_WIDTH (double) 1 / TEXTURE_WIDTH
-
-//ansonsten meckert vscode rum, dass M_PI entweder nicht definiert oder erneut definiert ist
-#ifndef M_PI
-#define M_PI 3.14159265358979323846264338327950288
-#endif
-#ifndef M_PI_2
-#define M_PI_2 M_PI / 2
-#endif
-
-#define TICKS_PER_SECOND 30
-#define MOVEMENT_SPEED .04
-#define ROTATION_SPEED M_PI / 200
-#define FOV 40
-#define LIGHT_INTENSITY_MULTIPLIER 5
-
-#define draw_start_y(distance) (Y_OFFSET - WINDOW_HEIGHT / distance)
-#define draw_end_y(distance) (Y_OFFSET + WINDOW_HEIGHT / distance)
-
-struct Vector
-{
-    double x, y;
-};
-
-struct Camera
-{
-    struct Vector position, direction, plane;
-};
+#include "defines.h"
+#include "math_stuff.c"
+#include "textures.c"
+#include "sprites.c"
 
 bool game_is_running = true;
 
-int map_width = 10, map_height = 10;
-int map[10][10] = {
+int wall_map[MAP_HEIGHT][MAP_WIDTH] = 
+{
     {1,1,1,2,1,2,2,0,0,1},
     {1,2,0,0,0,0,0,0,0,1},
     {1,0,0,0,0,0,1,1,0,2},
@@ -60,11 +22,25 @@ int map[10][10] = {
     {1,0,0,1,1,1,2,0,0,2},
     {2,0,0,1,0,0,0,0,0,1},
     {1,0,0,1,0,0,0,0,0,2}, 
-    {1,2,1,2,1,2,1,1,1,1}};
+    {1,2,1,2,1,2,1,1,1,1}
+};
+int sprite_map[MAP_HEIGHT][MAP_WIDTH] = 
+{
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0}
+};
 
 int rotation_direction = 0, movement_direction = 0, side_direction = 0;
 
-struct Camera cam = {.position.x = 5, .position.y = 5, .direction.x = 0, .direction.y = -1, .plane.x = FOV / 90.0, .plane.y = 0};
+Camera cam = {.position.x = 5, .position.y = 5, .direction.x = 0, .direction.y = -1, .plane.x = FOV / 90.0, .plane.y = 0};
 // struct Camera cam = {.position.x = 5, .position.y = 5, .direction.x = 1, .direction.y = 0, .plane.x = 0, .plane.y = FOV / 90.0};
 
 const SDL_Color FLOOR_COLOR = {.r = 100, .g = 100, .b = 100};
@@ -72,22 +48,22 @@ const SDL_Color SKY_COLOR = {.r = 50, .g = 50, .b = 50};
 
 uint8_t pixels[WINDOW_WIDTH * WINDOW_HEIGHT * 4] = {0};
 
-bool point_is_on_map(struct Vector *point)
+bool point_is_on_map(Vector *point)
 {
-    return (point->x >= 0 && point->x < map_width) && (point->y >= 0 && point->y < map_height);
+    return (point->x >= 0 && point->x < MAP_WIDTH) && (point->y >= 0 && point->y < MAP_HEIGHT);
 }
 
-bool point_is_a_wall(struct Vector *point)
+bool point_is_a_wall(Vector *point)
 {
-    return (map[(int) point->y][(int) point->x] != 0);
+    return (wall_map[(int) point->y][(int) point->x] != 0);
 }
 
-double distance_between_points(struct Vector *p1, struct Vector *p2)
+bool sprite_hit(Vector *ray_point, Sprite *sprite)
 {
-    double delta_x = fabs(p1->x - p2->x);
-    double delta_y = fabs(p1->y - p2->y);
+    double x = ray_point->x - sprite->position.x;
+    double y = ray_point->y - sprite->position.y;
 
-    return sqrt((delta_x * delta_x) + (delta_y * delta_y));
+    return (x * x + y * y <= SPRITE_WIDTH);
 }
 
 void events()
@@ -200,7 +176,7 @@ void update_camera()
     // beendet funktion wenn keine bewegung stattfindet um unnötige berechnungen zu sparen
     if (movement_direction == 0 && side_direction == 0) return;
 
-    struct Vector destination = {.x = cam.position.x, .y = cam.position.y};
+    Vector destination = {.x = cam.position.x, .y = cam.position.y};
 
     /*
         vorwärts- / rückwärtsbewegung
@@ -219,15 +195,33 @@ void update_camera()
     cam.position.y = destination.y;
 }
 
+void update_sprite_map()
+{
+    // for (int y = 0; y < MAP_HEIGHT; y++)
+    // {
+    //     for (int x = 0; x < MAP_WIDTH; x++)
+    //     {
+    //         sprite_map[y][x] = 0;
+    //     }
+    // }
+    // sprite_map[(int) test_sprite.position.y][(int) test_sprite.position.x] = 1;
+}
+
+void update_sprites()
+{
+    //  updated zum rendern benötigte variablen des sprites
+    for (int i = 0; i < sprite_array.count; i++) update_sprite(&sprite_array.sprites[i], &cam);
+}
+
 /*
     "schießt" einen strahl von der position der kamera aus und gibt die distanz der nächsten wand zurück.
     die richtung des strahls setzt sich aus dem richtungsvektor der kamera und dem offset (teil des plane vectors der kamera) zusammen.
     setzt zudem einige zusätzlich zum rendern benötigte infos (texture_id & horizontal_position_on_wall)
 */
-double raycast(struct Vector *offset, int *texture_id, double *horizontal_position_on_wall)
+double raycast(Vector *offset, int *texture_id, double *horizontal_position_on_wall)
 {
-    struct Vector ray_point = {.x = cam.position.x, .y = cam.position.y};
-    struct Vector ray_direction = {.x = cam.direction.x + offset->x, .y = cam.direction.y + offset->y};
+    Vector ray_point = {.x = cam.position.x, .y = cam.position.y};
+    Vector ray_direction = {.x = cam.direction.x + offset->x, .y = cam.direction.y + offset->y};
     
     double x_step_length, y_step_length, distance;    
     x_step_length = ray_direction.x * RAY_STEP_LENGTH;
@@ -241,7 +235,7 @@ double raycast(struct Vector *offset, int *texture_id, double *horizontal_positi
         ray_point.x += x_step_length;
         if (point_is_a_wall(&ray_point))
         {
-            *texture_id = map[(int) ray_point.y][(int) ray_point.x] - 1;
+            *texture_id = wall_map[(int) ray_point.y][(int) ray_point.x] - 1;
             *horizontal_position_on_wall = ray_point.y;
             distance = distance_between_points(&cam.position, &ray_point); 
             return distance;
@@ -250,14 +244,101 @@ double raycast(struct Vector *offset, int *texture_id, double *horizontal_positi
         ray_point.y += y_step_length;
         if (point_is_a_wall(&ray_point))
         {
-            *texture_id = map[(int) ray_point.y][(int) ray_point.x] - 1;
+            *texture_id = wall_map[(int) ray_point.y][(int) ray_point.x] - 1;
             *horizontal_position_on_wall = ray_point.x;
             distance = distance_between_points(&cam.position, &ray_point);
             return distance;
         }
+
+        for (int sprite_index = 0; sprite_index < sprite_array.count; sprite_index++)
+        {
+            //  bricht ab wenn das sprite hinter der kamera ist
+            if (sprite_array.sprites[sprite_index].is_behind_camera) continue;
+            //  überprüft ob der getestete punkt im sprite liegt und ob er sich der optimalen mittellinie durch das sprite angenähert hat
+            if (sprite_hit(&ray_point, &sprite_array.sprites[sprite_index]) && (distance_between_points(&sprite_array.sprites[sprite_index].position, &sprite_array.sprites[sprite_index].point_of_last_colision_with_ray) >= distance_between_points(&ray_point, &sprite_array.sprites[sprite_index].position) || !sprite_array.sprites[sprite_index].is_visible))
+            {
+                sprite_array.sprites[sprite_index].is_visible = true;
+                sprite_array.sprites[sprite_index].point_of_last_colision_with_ray.x = ray_point.x;
+                sprite_array.sprites[sprite_index].point_of_last_colision_with_ray.y = ray_point.y;
+            }
+        }
     }
 
     return -1;
+}
+
+/*
+    malt eine vertikale reihe der sichtbaren sprites bei fensterx = i
+
+    muss noch überarbeitet werden
+    - verständlichere namen & struktur
+
+    (ist jetzt nicht direkt hier, aber eine sprite map analog zu der map für wände wäre vielleicht praktisch um das raycasten zu beschleunigen)
+*/
+void draw_sprite_slice(uint8_t *pixels, int i, int sprite_index)
+{
+    int texture_y = 0, texture_x = 0;
+
+    /*
+        b ist ein probepunkt um zu schauen ob sich der punkt an dem das sprite getroffen wurde auf der rechten oder linken seite befindet.
+        es wird ein bisschen von cam.plane auf den kollisionspunkt addiert und da cam.plane einigermaßen orthogonal zur richtung des strahls ist,
+        entspricht seine richtung in etwa der der achse durch das sprite, auf dem die getroffenen punkte in etwa liegen.
+        wenn der dadurch resultierende punkt also näher am mittelpunkt des sprites (sprite.position) ist, liegt der punkt auf der linken seite des sprites.
+    */
+    Vector b = {.x = cam.plane.x * RAY_STEP_LENGTH + sprite_array.sprites[sprite_index].position.x, .y = cam.plane.y * RAY_STEP_LENGTH + sprite_array.sprites[sprite_index].position.y};
+    double d2;
+    if (distance_between_points(&sprite_array.sprites[sprite_index].position, &sprite_array.sprites[sprite_index].point_of_last_colision_with_ray) <= distance_between_points(&b, &sprite_array.sprites[sprite_index].point_of_last_colision_with_ray))
+    {
+        d2 = SPRITE_WIDTH - distance_between_points(&sprite_array.sprites[sprite_index].position, &sprite_array.sprites[sprite_index].point_of_last_colision_with_ray);
+    }
+    else
+    {
+        d2 = SPRITE_WIDTH + distance_between_points(&sprite_array.sprites[sprite_index].position, &sprite_array.sprites[sprite_index].point_of_last_colision_with_ray);
+    }
+    for (double a = 0; a <= d2; a += SPRITE_PIXEL_WIDTH) texture_x += 1;
+    // sonst wird texture_x irgendwie zu groß, hab absolut keinen plan warum und weiß nicht wie ich das wirklich fixen soll :/
+    if (texture_x > 64) return;
+
+    double draw_start = sprite_array.sprites[sprite_index].draw_start, draw_end = sprite_array.sprites[sprite_index].draw_end,
+           sprite_section_height = sprite_array.sprites[sprite_index].sprite_section_height,
+           end_of_current_sprite_section = sprite_array.sprites[sprite_index].end_of_current_sprite_section,
+           light_intensity = sprite_array.sprites[sprite_index].light_intensity;
+
+    if (draw_start < 0)
+    {
+        for (draw_start += sprite_section_height; draw_start < 0; draw_start += sprite_section_height)
+        {
+            texture_y++;
+            end_of_current_sprite_section += sprite_section_height;
+        }
+        draw_start = 0;
+    }
+    if (draw_end > WINDOW_HEIGHT) draw_end = WINDOW_HEIGHT - 1;
+
+    /*
+        malt alle pixel zwischen draw_start und draw_end
+    */
+    for (int y = draw_start; y <= draw_end; y++)
+    {
+        if (y >= end_of_current_sprite_section)
+        {
+            texture_y++;
+            end_of_current_sprite_section += sprite_section_height;
+        }
+
+        // umwandlung der 2d-textur-koordinaten zu 1d-index
+        int position_on_texture = texture_y * TEXTURE_WIDTH + texture_x;
+        
+        // überspringt durchsichtige pixel
+        if (sprite_array.sprites[sprite_index].texture[position_on_texture].a == 0) continue;
+        
+        // umwandlung der 2d-fenster-koordinaten zu 1d-indexs
+        int position_in_pixel_array = (X_OFFSET + i + WINDOW_WIDTH * y) * 4;
+
+        pixels[position_in_pixel_array] = sprite_array.sprites[sprite_index].texture[position_on_texture].r * light_intensity;
+        pixels[position_in_pixel_array + 1] = sprite_array.sprites[sprite_index].texture[position_on_texture].g * light_intensity;
+        pixels[position_in_pixel_array + 2] = sprite_array.sprites[sprite_index].texture[position_on_texture].b * light_intensity;
+    }
 }
 
 /*
@@ -270,19 +351,31 @@ void render_walls(uint8_t *pixels)
         /*
             offset um wie viel sich die richtung des strahls von der richtung der kamera unterscheidet
         */
-        struct Vector direction_offset = {.x = cam.plane.x / (WINDOW_WIDTH / 2) * i, .y = cam.plane.y / (WINDOW_WIDTH / 2) * i};
+        Vector direction_offset = {.x = cam.plane.x / (WINDOW_WIDTH / 2) * i, .y = cam.plane.y / (WINDOW_WIDTH / 2) * i};
 
         int texture_id = 0;
         double horizontal_position_on_wall; //  x bzw y koordinate des punkts in dem die wand getroffen wird
 
         double distance = raycast(&direction_offset, &texture_id, &horizontal_position_on_wall);
-        if (distance < 0) continue;
+
+        if (distance < 0)
+        {
+            for (int j = 0; j < sprite_array.count; j++)
+            {
+                if (sprite_array.sprites[j].is_visible)
+                {
+                    draw_sprite_slice(pixels, i, j);
+                    sprite_array.sprites[j].is_visible = false;
+                }
+            }
+            continue;
+        }
 
         /*
             weiter entfernte wände werden durch geringere lichtintensität dunkler gerendert
         */
-        double light_intensity = 1 / distance * LIGHT_INTENSITY_MULTIPLIER;
-        if (light_intensity > 1) light_intensity = 1;
+        double light_intensity = 1;
+        if (distance >= LIGHT_INTENSITY_MULTIPLIER) light_intensity = 1 / distance * LIGHT_INTENSITY_MULTIPLIER;
 
         /*
             berechnet anfangs- und endpunkt der wand
@@ -343,6 +436,15 @@ void render_walls(uint8_t *pixels)
             pixels[position_in_pixel_array + 1] = texture_pointer[position_on_texture].g * light_intensity;
             pixels[position_in_pixel_array + 2] = texture_pointer[position_on_texture].b * light_intensity;
         }
+
+        for (int j = 0; j < sprite_array.count; j++)
+        {
+            if (sprite_array.sprites[j].is_visible)
+            {
+                draw_sprite_slice(pixels, i, j);
+                sprite_array.sprites[j].is_visible = false;
+            }
+        }
     }
 }
 
@@ -364,6 +466,8 @@ void render(SDL_Renderer *renderer, SDL_Texture *texture)
     }
 
     render_walls(pixels);
+
+    // render_sprites(pixels);
 
     int texture_pitch = 0;
     void* texture_pixels = NULL;
@@ -408,6 +512,8 @@ int main(int argc, char const *argv[])
     SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, WINDOW_WIDTH, WINDOW_HEIGHT);
 
     init_textures();
+    init_sprites(&cam.position);
+    update_sprite_map();
 
     clock_t time_of_last_tick, current_time;
     time_of_last_tick = clock();
@@ -428,6 +534,8 @@ int main(int argc, char const *argv[])
             time_of_last_tick = current_time;
             
             update_camera();
+            update_sprites();
+            // update_sprite_map();
         }
 
         render(renderer, texture);
